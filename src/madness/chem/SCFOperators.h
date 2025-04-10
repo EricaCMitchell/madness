@@ -140,6 +140,8 @@ public:
 
     Exchange& set_printlevel(const long& level);
 
+    Exchange& set_thresh(const double& conv);
+
     Exchange& set_taskq(std::shared_ptr<MacroTaskQ> taskq1) {
         this->taskq=taskq1;
         return *this;

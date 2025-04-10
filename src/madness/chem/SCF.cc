@@ -1412,7 +1412,11 @@ vecfuncT SCF::apply_potential(World& world, const tensorT& occ,
 	  //if (world.rank() == 0) print("selecting exchange small memory");
 	  K.set_algorithm(Exchange<double,3>::Algorithm::small_memory);
 	}
-	
+    
+    if (param.hfexthresh() > -1.0) {
+        K.set_thresh(param.hfexthresh());
+    }
+
         K.set_symmetric(true).set_printlevel(param.print_level());
         vecfuncT Kamo = K(amo);
         tensorT excv = inner(world, Kamo, amo);

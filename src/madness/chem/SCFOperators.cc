@@ -742,6 +742,12 @@ Exchange<T,NDIM>& Exchange<T,NDIM>::set_printlevel(const long& level) {
     return *this;
 }
 
+template<typename T, std::size_t NDIM>
+Exchange<T,NDIM>& Exchange<T,NDIM>::set_thresh(const double& conv) {
+    impl->set_thresh(conv);
+    return *this;
+}
+
 template<>
 Fock<double, 3>::Fock(World &world, const Nemo *nemo) : world(world) {
     auto tmp = nemo->make_fock_operator();

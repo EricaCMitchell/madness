@@ -65,6 +65,7 @@ struct CalculationParameters : public QCCalculationParametersBase {
 		initialize<double>("charge",0.0,"total molecular charge");
 		initialize<std::string> ("xc","hf","XC input line");
 		initialize<std::string> ("hfexalg","multiworld_row","hf exchange algorithm: choose from multiworld, multiworld_row (default), smallmem, largemem");
+		initialize<double>("hfexthresh",-1.0,"hf exchange threshold");
 		initialize<double>("smear",0.0,"smearing parameter");
 		initialize<double>("econv",1.e-5,"energy convergence");
 		initialize<double>("dconv",1.e-4,"density convergence");
@@ -140,6 +141,7 @@ struct CalculationParameters : public QCCalculationParametersBase {
 
 	double econv() const {return get<double>("econv");}
 	double dconv() const {return get<double>("dconv");}
+	double hfexthresh() const {return get<double>("hfexthresh");}
 
 	bool converge_density() const {
 		std::vector<std::string> criteria=get<std::vector<std::string> >("convergence_criteria");

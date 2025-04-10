@@ -95,6 +95,11 @@ public:
         return *this;
     }
 
+    ExchangeImpl& set_thresh(const double& conv) {
+        thresh=conv;
+        return *this;
+    }
+
     ExchangeImpl& set_printlevel(const long& level) {
         printlevel=level;
         return *this;
