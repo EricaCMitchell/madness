@@ -2232,6 +2232,8 @@ void SCF::solve(World& world) {
     tensorT Q;
     bool do_this_iter = true;
     bool converged = false;
+    double eprev = 0.0;
+    int nelec = param.nalpha() + param.nbeta();
 
     // Shrink subspace until stop localizing/canonicalizing--- probably not a good idea
     // int maxsub_save = param.maxsub;
@@ -2452,20 +2454,30 @@ void SCF::solve(World& world) {
 
         if (iter > 0) {
             //print("##convergence criteria: density delta=", da < dconv * molecule.natom() && db < dconv * molecule.natom(), ", bsh_residual=", (param.conv_only_dens || bsh_residual < 5.0*dconv));
-            if (da < dconv * std::max(size_t(5), molecule.natom()) && db < dconv * std::max(size_t(5), molecule.natom())
-                && (param.get<bool>("conv_only_dens") || bsh_residual < 5.0 * dconv))
+            if (bsh_residual < FunctionDefaults<3>::get_thresh()) {
                 converged = true;
+                if (world.rank() == 0 && converged and (param.print_level() > 1)) {
+                    print("\nConverged for residuals!\n");
+                    converged_for_thresh=param.econv();
+                }
+            }
+            else if (std::abs((etot - eprev) / etot) < param.econv()
+                && da < dconv * nelec && db < dconv * nelec
+                && (param.get<bool>("conv_only_dens") || bsh_residual < 100.0 * dconv)) {
+                converged = true;
+                if (world.rank() == 0 && converged and (param.print_level() > 1)) {
+                    print("\nConverged for energy, density, and residuals!\n");
+                    converged_for_thresh=param.econv();
+                }
+            } else {
+                eprev = etot;
+            }
             // previous conv was too tight for small systems
             // if (da < dconv * molecule.natom() && db < dconv * molecule.natom()
             //     && (param.conv_only_dens || bsh_residual < 5.0 * dconv)) converged=true;
 
             // do diagonalization etc if this is the last iteration, even if the calculation didn't converge
             if (converged || iter == param.maxiter() - 1) {
-                if (world.rank() == 0 && converged and (param.print_level() > 1)) {
-                    print("\nConverged!\n");
-                    converged_for_thresh=param.econv();
-                }
-
                 // Diagonalize to get the eigenvalues and if desired the final eigenvectors
                 tensorT U;
                 START_TIMER(world);
@@ -2561,7 +2573,7 @@ void SCF::solve(World& world) {
         update_subspace(world, Vpsia, Vpsib, focka, fockb, subspace, Q,
                         bsh_residual, update_residual);
 
-    }
+    }  // end iter
 
     // compute the dipole moment
     functionT rho = make_density(world, aocc, amo);
