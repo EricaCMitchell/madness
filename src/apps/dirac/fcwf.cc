@@ -365,7 +365,7 @@ Fcwf copy(Fcwf psi){
 std::complex<double> inner(std::vector<Fcwf>& a, std::vector<Fcwf>& b){
      MADNESS_ASSERT(a.size() == b.size());
      std::complex<double> result(0,0);
-     for(int i = 0; i < a.size(); i++){
+     for(size_t i = 0; i < a.size(); i++){
           result += inner(a[i],b[i]);    
      }
      return result;
@@ -375,7 +375,7 @@ std::complex<double> inner(std::vector<Fcwf>& a, std::vector<Fcwf>& b){
 std::vector<Fcwf> operator*(const std::vector<Fcwf>& psis, std::complex<double> a){
      std::vector<Fcwf> result;
      if(psis.size() != 0){
-          for(int i = 0; i < psis.size(); i++){
+          for(size_t i = 0; i < psis.size(); i++){
                result.push_back(psis[i]*a);
           }
      }
@@ -385,7 +385,7 @@ std::vector<Fcwf> operator*(const std::vector<Fcwf>& psis, std::complex<double> 
 std::vector<Fcwf> operator*(std::complex<double> a, const std::vector<Fcwf>& psis){
      std::vector<Fcwf> result;
      if(psis.size() != 0){
-          for(int i = 0; i < psis.size(); i++){
+          for(size_t i = 0; i < psis.size(); i++){
                result.push_back(psis[i]*a);
           }
      }
@@ -399,7 +399,7 @@ void operator+=(std::vector<Fcwf>& phi, const std::vector<Fcwf>& psi){
      }
      else if(psi.size() != 0){
           MADNESS_ASSERT(phi.size()==psi.size());
-          for(int i=0; i < psi.size(); i++){
+          for(size_t i=0; i < psi.size(); i++){
                phi[i]+=psi[i];
           }
      }
@@ -416,7 +416,7 @@ std::vector<Fcwf> operator-(const std::vector<Fcwf>& phi, const std::vector<Fcwf
      }
      else{
           MADNESS_ASSERT(phi.size()==psi.size());
-          for(int i=0; i < psi.size(); i++){
+          for(size_t i=0; i < psi.size(); i++){
                result.push_back(phi[i]-psi[i]);
           }
      }
