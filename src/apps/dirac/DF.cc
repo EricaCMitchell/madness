@@ -199,25 +199,27 @@ double myr(const coord_3d& r){
 //Creates the (Gaussian) nuclear potential from the molecule object
 void DF::make_gaussian_potential(World& world, real_function_3d& potential){
      if(world.rank()==0) print("\n***Making a Gaussian Potential***");
-     GaussianNucleusFunctor Vfunctor(Init_params.molecule, DFparams.bohr_rad);
+     GaussianNuclearDensityPotentialFunctor Vfunctor(Init_params.molecule);
      potential = real_factory_3d(world).functor(Vfunctor).truncate_mode(0).truncate_on_project();
 }
 
 //Creates the (Gaussian) nuclear potential from the molecule object. Also calculates the nuclear repulsion energy
 void DF::make_gaussian_potential(World& world, real_function_3d& potential, double& nuclear_repulsion_energy){
      if(world.rank()==0) print("\n***Making a Gaussian Potential***");
-     GaussianNucleusFunctor Vfunctor(Init_params.molecule,DFparams.bohr_rad);
+     auto molecule = Init_params.molecule;
+
+     GaussianNuclearDensityPotentialFunctor Vfunctor(molecule);
      potential = real_factory_3d(world).functor(Vfunctor).truncate_mode(0).truncate_on_project();
-     std::vector<coord_3d> Rlist = Vfunctor.get_Rlist();
-     std::vector<int> Zlist = Vfunctor.get_Zlist();
+
      nuclear_repulsion_energy = 0.0;
      double rr;
-     int num_atoms = Rlist.size();
-     for(int m = 0; m < num_atoms; m++){
-          for(int n = m+1; n < num_atoms; n++){
-               coord_3d dist = Rlist[m] - Rlist[n];
+     for(size_t m = 0; m < molecule.natom(); m++){
+          auto& atom_m = molecule.get_atom(m);
+          for(size_t n = m+1; n < molecule.natom(); n++){
+               auto& atom_n = molecule.get_atom(n);
+               coord_3d dist = atom_m.get_coords() - atom_n.get_coords();
                rr = std::sqrt(dist[0]*dist[0]+dist[1]*dist[1]+dist[2]*dist[2]);
-               nuclear_repulsion_energy += Zlist[m]*Zlist[n]/rr;
+               nuclear_repulsion_energy += atom_m.atomic_number * atom_n.atomic_number / rr;
           }
      }
 
@@ -239,7 +241,7 @@ void DF::make_fermi_potential(World& world, real_convolution_3d& op, real_functi
      const double safety = 0.1;
      double vtol = madness::FunctionDefaults<3>::get_thresh() * safety;
      for(auto&& atom : molecule.get_atoms()){
-          madness::FermiPotentialFunctor rho(atom);
+          madness::FermiNuclearDensityFunctor rho(atom);
           temp = real_factory_3d(world).functor(rho).thresh(vtol);
           tempnorm = temp.trace();
           temp.scale(-1. * atom.atomic_number / tempnorm);
@@ -305,12 +307,7 @@ void DF::make_point_potential(World& world, real_function_3d& potential, double&
      auto molecule = Init_params.molecule;
      MolecularPotentialFunctor Vfunctor(molecule);
      potential = real_factory_3d(world).functor(Vfunctor).truncate_mode(0).truncate_on_project();
-     
-     std::vector<coord_3d> Rlist = molecule.get_all_coords_vec();
-     std::vector<int> Zlist;
-     for(unsigned int i = 0; i < Rlist.size(); i++){
-          Zlist.push_back(molecule.get_atomic_number(i));
-     }
+
      nuclear_repulsion_energy = 0.0;
      double rr;
      for(unsigned int m = 0; m < molecule.natom(); m++){
@@ -1139,35 +1136,6 @@ void DF::saveDF(World& world){
 
      times = end_timer(world);
      if(world.rank()==0) print("     ", times[0]);
-}
-
-//Creates the (Gaussian) nuclear potential from the molecule object
-void DF::make_gaussian_potential(World& world, real_function_3d& potential){
-     if(world.rank()==0) print("\n***Making a Gaussian Potential***");
-     GaussianNuclearDensityPotentialFunctor Vfunctor(Init_params.molecule);
-     potential = real_factory_3d(world).functor(Vfunctor).truncate_mode(0).truncate_on_project();
-}
-
-//Creates the (Gaussian) nuclear potential from the molecule object. Also calculates the nuclear repulsion energy
-void DF::make_gaussian_potential(World& world, real_function_3d& potential, double& nuclear_repulsion_energy){
-     if(world.rank()==0) print("\n***Making a Gaussian Potential***");
-     auto molecule = Init_params.molecule;
-
-     GaussianNuclearDensityPotentialFunctor Vfunctor(molecule);
-     potential = real_factory_3d(world).functor(Vfunctor).truncate_mode(0).truncate_on_project();
-
-     nuclear_repulsion_energy = 0.0;
-     double rr;
-     for(size_t m = 0; m < molecule.natom(); m++){
-          auto& atom_m = molecule.get_atom(m);
-          for(size_t n = m+1; n < molecule.natom(); n++){
-               auto& atom_n = molecule.get_atom(n);
-               coord_3d dist = atom_m.get_coords() - atom_n.get_coords();
-               rr = std::sqrt(dist[0]*dist[0]+dist[1]*dist[1]+dist[2]*dist[2]);
-               nuclear_repulsion_energy += atom_m.atomic_number * atom_n.atomic_number / rr;
-          }
-     }
-
 }
 
 //Own version of load balancing for DF. Load balance on the functions as well as the nuclear potential
