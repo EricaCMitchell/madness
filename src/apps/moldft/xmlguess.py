@@ -1,7 +1,7 @@
-import sys, string
+import sys
 
 data = sys.stdin
-basis = "STO-3G"
+basis = "ANO-RCC-MB"
 
 def find_string(s):
     n = len(s)
@@ -28,7 +28,6 @@ def read_numao():
     return n
 
 def read_energy():
-    find_string("     <<<<<<              called scfcvg")
     line = find_string("         Total DFT energy =").split()
     energy = float(line[4])
     return energy
@@ -43,11 +42,11 @@ def read_occn(n, ab):
     
     for i in range(n):
         line = find_string(" Vector ").split()
-        occ[i] = float(string.replace(line[2].split("=")[1],"D","e"))
+        occ[i] = float(line[2].split("=")[1].replace("D","e"))
         e = line[4]
         if e[0] == "S":
             e = line[3].split("=")[1]
-        eps[i] = float(string.replace(e,"D","e"))
+        eps[i] = float(e.replace("D","e"))
         
     return (occ,eps)
 
@@ -88,14 +87,10 @@ def make_density(n, aocc, amo, bocc, bmo):
 
 def print_matrix(n, m, a):
     for i in range(n):
-        for j in range(m):
-            print "%12.5f" % a[i][j],
-        print ""
+        print(" ".join("%12.5f" % a[i][j] for j in range(m)))
 
 def print_vector(n, a):
-    for i in range(n):
-        print "%12.5f" % a[i],
-    print ""
+    print(" ".join("%12.5f" % a[i] for i in range(n)))
 
 while 1:
     atom = read_geometry()
@@ -110,29 +105,29 @@ while 1:
 
     density = make_density(n, aocc, amo, bocc, bmo)
 
-    print "<atomicguess symbol=\"%s\" basis=\"%s\">" % (atom,basis)
-    print "   <guessdensitymatrix>"
+    print("<atomicguess symbol=\"%s\" basis=\"%s\">" % (atom,basis))
+    print("   <guessdensitymatrix>")
     print_matrix(n, n, density)
-    print "   </guessdensitymatrix>"
-    print "   <alphaocc>"
+    print("   </guessdensitymatrix>")
+    print("   <alphaocc>")
     print_vector(n, aocc)
-    print "   </alphaocc>"
-    print "   <betaocc>"
+    print("   </alphaocc>")
+    print("   <betaocc>")
     print_vector(n, bocc)
-    print "   </betaocc>"
-    print "   <alphaeps>"
+    print("   </betaocc>")
+    print("   <alphaeps>")
     print_vector(n, aeps)
-    print "   </alphaeps>"
-    print "   <betaeps>"
+    print("   </alphaeps>")
+    print("   <betaeps>")
     print_vector(n, beps)
-    print "   </betaeps>"
-    print "   <alphavectors>"
+    print("   </betaeps>")
+    print("   <alphavectors>")
     print_matrix(n, n, amo)
-    print "   </alphavectors>"
-    print "   <betavectors>"
+    print("   </alphavectors>")
+    print("   <betavectors>")
     print_matrix(n, n, bmo)
-    print "   </betavectors>"
-    print "</atomicguess>"
+    print("   </betavectors>")
+    print("</atomicguess>")
     
 
 
