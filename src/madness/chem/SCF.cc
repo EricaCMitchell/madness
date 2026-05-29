@@ -999,12 +999,22 @@ void SCF::initial_guess(World& world) {
         }
     }
 
-    // Use the initial density and potential to generate a better process map
+    // Use the initial density and potential to generate a better process map.
+    // When the AO basis has no embedded atomic guess densities (newly added
+    // bases converted from BSE may lack them), fall back to sto-3g densities.
+    AtomicBasisSet density_basis;
+    if (aobasis.has_guess_info(molecule)) {
+        density_basis = aobasis;
+    } else {
+        if (world.rank() == 0)
+            print("aobasis has no atomic guess densities; using sto-3g for initial density (elements unsupported by sto-3g get a trivial Gaussian)");
+        density_basis.read_file("sto-3g");
+    }
     functionT rho =
             factoryT(world).functor(
                     functorT(
                             new MolecularGuessDensityFunctor(molecule,
-                                                             aobasis))).truncate_on_project();
+                                                             density_basis))).truncate_on_project();
     double nel = rho.trace();
     if (world.rank() == 0 and param.print_level() > 3)
         print("guess dens trace", nel);

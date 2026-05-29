@@ -99,7 +99,7 @@ struct CalculationParameters : public QCCalculationParametersBase {
 		initialize<int>    ("npt_plot",101,"no. of points to use in each dim for plots");
 //		initialize<Tensor<double> > ("plot_cell",Tensor<double>(),"lo hi in each dimension for plotting (default is all space)");
 		initialize<std::vector<double> > ("plot_cell",std::vector<double>(),"lo hi in each dimension for plotting (default is all space)");
-		initialize<std::string> ("aobasis","6-31g","AO basis used for initial guess (6-31gss, 6-31g, 3-21g, sto-6g, sto-3g)");
+		initialize<std::string> ("aobasis","6-31g","AO basis used for initial guess; installed bases: sto-3g, sto-6g, 3-21g, 6-31g, 6-31gs, 6-31gss, 6-31++gss, 6-311gss, 6-311++gss, cc-pvdz, cc-pvtz, aug-cc-pvdz, aug-cc-pvtz, def2-svp, def2-tzvp, def2-tzvpp; for any other basis supply nwfile=<nwchem_file>");
 		initialize<bool> ("derivatives",false,"if true calculate nuclear derivatives");
 		initialize<bool> ("dipole",false,"if true calculate dipole moment");
 		initialize<bool> ("conv_only_dens",false,"if true remove bsh_residual from convergence criteria (deprecated)");

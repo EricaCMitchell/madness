@@ -645,21 +645,38 @@ public:
     /// Evaluates the guess density
     double eval_guess_density(const Molecule& molecule, double x, double y, double z) const {
         double sum = 0.0;
-        bool pspat;
         for (size_t i=0; i<molecule.natom(); ++i) {
             const Atom& atom = molecule.get_atom(i);
-            if (atom.pseudo_atom){
-                pspat=true;}
-            else{
-                pspat=false;}
             const int atn = atom.atomic_number;
-            sum += ag[atn].eval_guess_density(x-atom.x, y-atom.y, z-atom.z, pspat);
+            const double dx = x - atom.x, dy = y - atom.y, dz = z - atom.z;
+            if (ag[atn].has_guess_info()) {
+                sum += ag[atn].eval_guess_density(dx, dy, dz, atom.pseudo_atom);
+            } else {
+                // Basis has no atomic guess density for this element; use a
+                // trivial normalized spherical Gaussian integrating to Z electrons:
+                //   rho(r) = Z * (alpha/pi)^(3/2) * exp(-alpha*r^2)
+                static constexpr double alpha = 1.0;
+                static constexpr double norm = 1.0 / (madness::constants::sqrt_pi *
+                                                       madness::constants::sqrt_pi *
+                                                       madness::constants::sqrt_pi);
+                const double rsq = dx*dx + dy*dy + dz*dz;
+                sum += atn * norm * std::exp(-alpha * rsq);
+            }
         }
         return sum;
     }
 
     bool is_supported(int atomic_number) const {
         return ag[atomic_number].nbf() > 0;
+    }
+
+    /// Returns true if all atoms in the molecule have atomic guess density info
+    bool has_guess_info(const Molecule& molecule) const {
+        for (size_t i = 0; i < molecule.natom(); ++i) {
+            const int atn = molecule.get_atom(i).atomic_number;
+            if (!ag[atn].has_guess_info()) return false;
+        }
+        return true;
     }
 
     /// Print basis info for atoms in the molecule (once for each unique atom type)
