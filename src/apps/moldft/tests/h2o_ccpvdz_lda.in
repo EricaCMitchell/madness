@@ -1,0 +1,13 @@
+# H2O LDA with cc-pVDZ AO basis for initial guess
+# Reference LDA energy: ~-75.913345 Eh (same as 6-31g default; aobasis only affects guess)
+
+dft
+  xc lda
+  aobasis cc-pvdz
+end
+
+geometry
+  O  0.0    0.0 0.0
+  H  1.4375 0.0 1.15
+  H -1.4375 0.0 1.15
+end

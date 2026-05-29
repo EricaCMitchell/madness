@@ -1,6 +1,11 @@
 dft
   xc LDA
   maxsub 5
+  # aobasis selects the Gaussian basis for the initial MRA guess only.
+  # Installed options: sto-3g, sto-6g, 3-21g, 6-31g (default), 6-31gs,
+  #   6-31gss, 6-31++gss, 6-311gss, 6-311++gss, cc-pvdz, cc-pvtz,
+  #   aug-cc-pvdz, aug-cc-pvtz, def2-svp, def2-tzvp, def2-tzvpp.
+  # Example: aobasis cc-pvdz
 end
   #xc GGA_X_PBE .75 GGA_C_PBE 1. HF_X .25
 
