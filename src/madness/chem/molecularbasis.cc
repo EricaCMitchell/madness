@@ -33,6 +33,9 @@
 
 #include<madness/chem/molecularbasis.h>
 #include "NWChem.h"
+#include <dirent.h>
+#include <algorithm>
+#include <sys/stat.h>
 
 namespace madness {
 
@@ -120,27 +123,43 @@ void AtomicBasisSet::read_file(std::string filename) {
     static const bool debug = false;
     const char* data_dir = MRA_CHEMDATA_DIR;
 
-    std::string full_filename(data_dir);
-    full_filename+="/"+filename;
+    std::string basis_dir(data_dir);
+    if (getenv("MRA_CHEMDATA_DIR"))
+        basis_dir = std::string(getenv("MRA_CHEMDATA_DIR"));
 
-    // override default location for the basis set
-    if (getenv("MRA_CHEMDATA_DIR")) {
-    	char* chemdata_dir=getenv("MRA_CHEMDATA_DIR");
-        full_filename=std::string(chemdata_dir)+"/"+filename;
-    }
-
+    std::string full_filename = basis_dir + "/" + filename;
 
     TiXmlDocument doc(full_filename);
 
-    // try to read the AO basis from current directory, otherwise from
-    // the environment variable MRA_DATA_DIR
     if (!doc.LoadFile()) {
-
-    	std::cout << "AtomicBasisSet: Failed loading from file " << filename
-    			<< " : ErrorDesc  " << doc.ErrorDesc()
-    			<< " : Row " << doc.ErrorRow()
-    			<< " : Col " << doc.ErrorCol() << std::endl;
-    	MADNESS_EXCEPTION("AtomicBasisSet: Failed loading basis set",0);
+        std::cout << "AtomicBasisSet: Failed to load basis \"" << filename
+                  << "\" from " << basis_dir << std::endl;
+        std::vector<std::string> available;
+        if (DIR* dir = opendir(basis_dir.c_str())) {
+            struct dirent* ent;
+            while ((ent = readdir(dir)) != nullptr) {
+                std::string n = ent->d_name;
+                if (n.empty() || n[0] == '.') continue;
+                bool looks_like_basis = (n.find('.') == std::string::npos);
+                if (looks_like_basis) {
+                    std::string full = basis_dir + "/" + n;
+                    struct stat st;
+                    if (stat(full.c_str(), &st) == 0 && S_ISREG(st.st_mode))
+                        available.push_back(n);
+                }
+            }
+            closedir(dir);
+        }
+        if (!available.empty()) {
+            std::sort(available.begin(), available.end());
+            std::cout << "Available bases in " << basis_dir << ":" << std::endl;
+            const size_t maxshow = 20;
+            for (size_t i = 0; i < std::min(available.size(), maxshow); ++i)
+                std::cout << "  " << available[i] << std::endl;
+            if (available.size() > maxshow)
+                std::cout << "  ... (" << available.size() - maxshow << " more)" << std::endl;
+        }
+        MADNESS_EXCEPTION("AtomicBasisSet: Failed loading basis set",0);
     }
     for (TiXmlElement* node=doc.FirstChildElement(); node; node=node->NextSiblingElement()) {
         if (strcmp(node->Value(),"name") == 0) {

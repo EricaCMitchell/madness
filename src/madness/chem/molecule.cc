@@ -199,8 +199,8 @@ void Molecule::get_structure() {
 };
 
 std::string Molecule::get_structure_library_path() {
-    std::string chemdata_dir(MRA_CHEMDATA_DIR);
-    if (getenv("MRA_CHEMDATA_DIR")) chemdata_dir=std::string(getenv("MRA_CHEMDATA_DIR"));
+    std::string chemdata_dir(MRA_CHEMDATA_ROOT);
+    if (getenv("MRA_CHEMDATA_ROOT")) chemdata_dir=std::string(getenv("MRA_CHEMDATA_ROOT"));
     return chemdata_dir+"/structure_library";
 }
 

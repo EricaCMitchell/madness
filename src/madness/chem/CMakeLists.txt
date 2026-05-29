@@ -1,6 +1,7 @@
 # src/apps/chem
 
-add_definitions(-DMRA_CHEMDATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
+add_definitions(-DMRA_CHEMDATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/basissets\")
+add_definitions(-DMRA_CHEMDATA_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}\")
 
 # Set the CHEM sources and header files
 set(MADCHEM_HEADERS
@@ -154,7 +155,19 @@ if (NOT MADNESS_BUILD_LIBRARIES_ONLY)
 endif()
 
 # Install files
-install(FILES sto-3g sto-6g 6-31g coredata/mcp coredata/mcp2 coredata/mcp_guess structure_library
+install(FILES
+        basissets/sto-3g basissets/sto-6g
+        basissets/3-21g
+        basissets/6-31g basissets/6-31gs basissets/6-31gss basissets/6-31++gss
+        basissets/6-311gss basissets/6-311++gss
+        basissets/cc-pvdz basissets/cc-pvtz
+        basissets/aug-cc-pvdz basissets/aug-cc-pvtz
+        basissets/def2-svp basissets/def2-tzvp basissets/def2-tzvpp
+    DESTINATION "${MADNESS_INSTALL_DATADIR}/basissets"
+    COMPONENT chem)
+install(FILES
+        coredata/mcp coredata/mcp2 coredata/mcp_guess
+        structure_library
     DESTINATION "${MADNESS_INSTALL_DATADIR}"
     COMPONENT chem)
 
@@ -164,7 +177,8 @@ if(BUILD_TESTING)
   SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
   # The list of unit test source files
   set(CHEM_TEST_SOURCES_SHORT test_pointgroupsymmetry.cc test_masks_and_boxes.cc
-  test_qc.cc test_MolecularOrbitals.cc test_BSHApply.cc test_projector.cc)
+  test_qc.cc test_MolecularOrbitals.cc test_BSHApply.cc test_projector.cc
+  test_aobasis.cc)
   set(CHEM_TEST_SOURCES_LONG test_localizer.cc test_ccpairfunction.cc test_low_rank_function.cc)
   if (TARGET Libxc::xc)
     list(APPEND CHEM_TEST_SOURCES_SHORT test_dft.cc )
