@@ -35,7 +35,7 @@ namespace madness{
           InitParameters() {}
 
           // Initializes InitParameters using the contents of file \c filename
-          void read(World& world, const std::string& filename, const double& myc, bool restart, bool Krestricted){ 
+          void read(World& world, const std::string& filename, const double& myc, bool restart, bool Krestricted, double small_comp_factor){
                // Save the filename
                inFile = filename;
   
@@ -63,7 +63,7 @@ namespace madness{
 
                     //Now we just have to unpack the orbitals
                     for(unsigned int i=0; i < num_occupied; i++){
-                         Fcwf reader(world, myc);
+                         Fcwf reader(world, myc, small_comp_factor);
                          for(int j=0; j < 4; j++){
                               input & reader[j];
                          }
@@ -123,8 +123,8 @@ namespace madness{
                          //Initialize some functions for reading in the orbitals
                          real_function_3d reader;
                          complex_function_3d complexreader;
-                         Fcwf spinup(world, myc);
-                         Fcwf spindown(world, myc); //used if !Krestricted
+                         Fcwf spinup(world, myc, small_comp_factor);
+                         Fcwf spindown(world, myc, small_comp_factor); //used if !Krestricted
                          real_function_3d xfunc = real_factory_3d(world).f(myxfunc);
                          real_function_3d yfunc = real_factory_3d(world).f(myyfunc);
                          
@@ -142,9 +142,9 @@ namespace madness{
                                    spinup[0] = complexreader;
                                    spinup[1] = complex_factory_3d(world);
                                    spinup[2] = (-myi) * Dz(complexreader);
-                                   spinup[2].scale(0.5);
+                                   spinup[2].scale(small_comp_factor / (2 * myc));
                                    spinup[3] = (-myi) * (Dx(complexreader) + myi * Dy(complexreader));
-                                   spinup[3].scale(0.5);
+                                   spinup[3].scale(small_comp_factor / (2 * myc));
                                    spinup.normalize();
                                    orbitals.push_back(spinup);
                               }
@@ -165,16 +165,16 @@ namespace madness{
                                    spinup[0] = complexreader;
                                    spinup[1] = complex_factory_3d(world);
                                    spinup[2] = (-myi) * Dz(complexreader);
-                                   spinup[2].scale(0.5);
+                                   spinup[2].scale(small_comp_factor / (2 * myc));
                                    spinup[3] = (-myi) * (Dx(complexreader) + myi * Dy(complexreader));
-                                   spinup[3].scale(0.5);
+                                   spinup[3].scale(small_comp_factor / (2 * myc));
                                    spinup.normalize();
                                    spindown[0] = complex_factory_3d(world);
                                    spindown[1] = complexreader;
                                    spindown[2] = (-myi) * (Dx(complexreader) - myi * Dy(complexreader));
-                                   spindown[2].scale(0.5);
+                                   spindown[2].scale(small_comp_factor / (2 * myc));
                                    spindown[3] = (myi) * Dz(complexreader);
-                                   spindown[3].scale(0.5);
+                                   spindown[3].scale(small_comp_factor / (2 * myc));
                                    spindown.normalize();
                                    orbitals.push_back(spinup);
                                    orbitals.push_back(spindown);
@@ -196,16 +196,16 @@ namespace madness{
                          // Read in alpha ground state orbitals
                          real_function_3d reader;
                          complex_function_3d complexreader;
-                         Fcwf fcwfreader(world, myc);
+                         Fcwf fcwfreader(world, myc, small_comp_factor);
                          for(unsigned int i = 0; i < num_occupied; i++){
                               input & reader;
                               complexreader = function_real2complex(reader);
                               fcwfreader[0] = complexreader;
                               fcwfreader[1] = complex_factory_3d(world);
                               fcwfreader[2] = (-myi) * Dz(complexreader);
-                              fcwfreader[2].scale(0.5);
+                              fcwfreader[2].scale(small_comp_factor / (2 * myc));
                               fcwfreader[3] = (-myi) * (Dx(complexreader) + myi * Dy(complexreader));
-                              fcwfreader[3].scale(0.5);
+                              fcwfreader[3].scale(small_comp_factor / (2 * myc));
                               fcwfreader.normalize();
                               orbitals.push_back(fcwfreader);
                          }
@@ -231,9 +231,9 @@ namespace madness{
                                    fcwfreader[0] = complex_factory_3d(world);
                                    fcwfreader[1] = complexreader;
                                    fcwfreader[2] = (-myi) * (Dx(complexreader) - myi * Dy(complexreader));
-                                   fcwfreader[2].scale(0.5);
+                                   fcwfreader[2].scale(small_comp_factor / (2 * myc));
                                    fcwfreader[3] = (myi) * Dz(complexreader);
-                                   fcwfreader[3].scale(0.5);
+                                   fcwfreader[3].scale(small_comp_factor / (2 * myc));
                                    fcwfreader.normalize();
                                    orbitals.push_back(fcwfreader);
                               }
@@ -259,7 +259,7 @@ namespace madness{
                     
                     //reorder orbitals and energies in ascending order, if necessary.
                     double tempdouble;
-                    Fcwf fcwfreader(world, myc);
+                    Fcwf fcwfreader(world, myc, small_comp_factor);
                     for(unsigned int i = 0; i < num_occupied; i++){
                          for(unsigned int j = i+1; j < num_occupied; j++){
                               if(energies(j) < energies(i)){
@@ -278,7 +278,7 @@ namespace madness{
 
           //This function no longer works
           //TODO: Update this function before using it
-          void readnw(World& world, const std::string& filename, const double& myc, bool Krestricted){
+          void readnw(World& world, const std::string& filename, const double& myc, bool Krestricted, double small_comp_factor){
                //Called to read in initial parameters from an nwchem output file
                
                //For now just use default values for L and order
@@ -413,8 +413,8 @@ namespace madness{
 
                //Convert and store alpha occupied MOs.
                complex_function_3d complexreader(world);
-               Fcwf spinup(world, myc);
-               Fcwf spindown(world, myc);
+               Fcwf spinup(world, myc, small_comp_factor);
+               Fcwf spindown(world, myc, small_comp_factor);
                complex_derivative_3d Dx(world,0);
                complex_derivative_3d Dy(world,1);
                complex_derivative_3d Dz(world,2);
@@ -424,18 +424,18 @@ namespace madness{
                     spinup[0] = complexreader;
                     spinup[1] = complex_factory_3d(world);
                     spinup[2] = (-myi) * Dz(complexreader);
-                    spinup[2].scale(0.5);
+                    spinup[2].scale(small_comp_factor / (2 * myc));
                     spinup[3] = (-myi) * (Dx(complexreader) + myi * Dy(complexreader));
-                    spinup[3].scale(0.5);
+                    spinup[3].scale(small_comp_factor / (2 * myc));
                     spinup.normalize();
                     orbitals.push_back(spinup);
                     if(!Krestricted){
                          spindown[0] = complex_factory_3d(world);
                          spindown[1] = complexreader;
                          spindown[2] = (-myi) * (Dx(complexreader) - myi * Dy(complexreader));
-                         spindown[2].scale(0.5);
+                         spindown[2].scale(small_comp_factor / (2 * myc));
                          spindown[3] = (myi) * Dz(complexreader);
-                         spindown[3].scale(0.5);
+                         spindown[3].scale(small_comp_factor / (2 * myc));
                          spindown.normalize();
                          orbitals.push_back(spindown);
                     }
@@ -444,18 +444,18 @@ namespace madness{
                spinup[0] = complexreader;
                spinup[1] = complex_factory_3d(world);
                spinup[2] = (-myi) * Dz(complexreader);
-               spinup[2].scale(0.5);
+               spinup[2].scale(small_comp_factor / (2 * myc));
                spinup[3] = (-myi) * (Dx(complexreader) + myi * Dy(complexreader));
-               spinup[3].scale(0.5);
+               spinup[3].scale(small_comp_factor / (2 * myc));
                spinup.normalize();
                orbitals.push_back(spinup);
                if(closed_shell and not Krestricted){
                     spindown[0] = complex_factory_3d(world);
                     spindown[1] = complexreader;
                     spindown[2] = (-myi) * (Dx(complexreader) - myi * Dy(complexreader));
-                    spindown[2].scale(0.5);
+                    spindown[2].scale(small_comp_factor / (2 * myc));
                     spindown[3] = (myi) * Dz(complexreader);
-                    spindown[3].scale(0.5);
+                    spindown[3].scale(small_comp_factor / (2 * myc));
                     spindown.normalize();
                     orbitals.push_back(spindown);
                }

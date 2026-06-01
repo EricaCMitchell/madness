@@ -352,10 +352,10 @@ DF::DF(World & world,std::shared_ptr<std::istream> input) {
 
      // Read in archive, but first find out if we're reading an nwchem file or other archive
      if(DFparams.nwchem){
-          Init_params.readnw(world, DFparams.archive, DFparams.speed_of_light, DFparams.Krestricted);
+          Init_params.readnw(world, DFparams.archive, DFparams.speed_of_light, DFparams.Krestricted, DFparams.small_comp_factor);
      }
      else{
-          Init_params.read(world, DFparams.archive, DFparams.speed_of_light, DFparams.restart, DFparams.Krestricted);
+          Init_params.read(world, DFparams.archive, DFparams.speed_of_light, DFparams.restart, DFparams.Krestricted, DFparams.small_comp_factor);
      }
 
      //print initialization parameters and molecule geometry
@@ -406,10 +406,10 @@ DF::DF(World & world,std::shared_ptr<std::istream> input) {
 }
 
 //returns a new Fcwf that is the result of applying the Dirac free-particle hamiltonian on psi
-Fcwf apply_T(World& world, Fcwf& psi, const double& myc){
+Fcwf apply_T(World& world, Fcwf& psi, const double& myc, const double& my_s_fac){
      std::complex<double> myi(0,1);
      auto D = madness::gradient_operator<std::complex<double>, 3>(world);
-     Fcwf Tpsi(world, myc);
+     Fcwf Tpsi(world, myc, my_s_fac);
      
      //reconstruct psi
      psi.reconstruct();
@@ -426,17 +426,21 @@ Fcwf apply_T(World& world, Fcwf& psi, const double& myc){
      psi.compress();
 
      //combine to calculate application of T
-     Tpsi[0] = psiz[2] + psix[3] - myi*psiy[3];
-     Tpsi[1] = psix[2] + myi*psiy[2] - psiz[3];
-     Tpsi[2] = (myc*myc)*(psiz[0] + psix[1] - myi*psiy[1] - (2.0*myi)*psi[2]);
-     Tpsi[3] = (myc*myc)*(psix[0] + myi*psiy[0] - psiz[1] - (2.0*myi)*psi[3]);
+     // Large components scale by myc/my_s_fac because stored_S = my_s_fac*physical_S,
+     // so c*sigma.p*physical_S = (myc/my_s_fac)*sigma.p*stored_S.
+     // Small components use myc*my_s_fac for the sigma.p part (s_fac * c * sigma.p L)
+     // and myc^2 for the rest-energy part (mc^2 = c^2), which are equal only when s_fac==c.
+     Tpsi[0] = (myc/my_s_fac) * (psiz[2] + psix[3] - myi*psiy[3]);
+     Tpsi[1] = (myc/my_s_fac) * (psix[2] + myi*psiy[2] - psiz[3]);
+     Tpsi[2] = (my_s_fac*myc)*(psiz[0] + psix[1] - myi*psiy[1]) - (2.0*myi*myc*myc)*psi[2];
+     Tpsi[3] = (my_s_fac*myc)*(psix[0] + myi*psiy[0] - psiz[1]) - (2.0*myi*myc*myc)*psi[3];
 
      return Tpsi * (-myi);
 }
 
 //function to calculate the kinetic + rest energy expectation value using Dirac Hamiltonian c*\alpha*p+\Beta*m*c*c
 double DF::rele(World& world, Fcwf& psi){
-     Fcwf Tpsi = apply_T(world, psi, DFparams.speed_of_light);
+     Fcwf Tpsi = apply_T(world, psi, DFparams.speed_of_light, DFparams.small_comp_factor);
      std::complex<double> energy  = inner(psi, Tpsi);
      return energy.real();
 }
@@ -449,12 +453,12 @@ void DF::exchange(World& world, real_convolution_3d& op, std::vector<Fcwf>& Kpsi
 
      //Calculate and accumulate exchange contributions
      unsigned int n = Init_params.num_occupied;
-     double myc = DFparams.speed_of_light;
-     double myc2 = myc * myc;
+     double s_fac = DFparams.small_comp_factor;
+     double s_fac2 = s_fac * s_fac;
 
      //zero out Kpsis
      for(unsigned int i = 0; i < n; i++){
-          Kpsis[i] = Fcwf(world, DFparams.speed_of_light);
+          Kpsis[i] = Fcwf(world, DFparams.speed_of_light, DFparams.small_comp_factor);
      }
 
      //reconstruct
@@ -489,8 +493,8 @@ void DF::exchange(World& world, real_convolution_3d& op, std::vector<Fcwf>& Kpsi
           //These gaxpy calls accomplish the (\phi_j^\dagger)(\phi_i) in the numerator 
           gaxpy(world, 1.0, temp, 1.0, occupieds[i][0]*conj(world,temp0));
           gaxpy(world, 1.0, temp, 1.0, occupieds[i][1]*conj(world,temp1));
-          gaxpy(world, 1.0, temp, 1.0/(myc*myc), occupieds[i][2]*conj(world,temp2));
-          gaxpy(world, 1.0, temp, 1.0/(myc*myc), occupieds[i][3]*conj(world,temp3));
+          gaxpy(world, 1.0, temp, 1.0/(s_fac2), occupieds[i][2]*conj(world,temp2));
+          gaxpy(world, 1.0, temp, 1.0/(s_fac2), occupieds[i][3]*conj(world,temp3));
 
           //truncate before apply phase
           truncate(world, temp);
@@ -566,8 +570,8 @@ void DF::exchange(World& world, real_convolution_3d& op, std::vector<Fcwf>& Kpsi
                //These gaxpy calls accomplish the (\phi_j^T)(\phi_i) in the numerator. Conjugation of phi_j is left to later
                gaxpy(world, 1.0, temp, 1.0, occupieds[i][0]*temp0);
                gaxpy(world, 1.0, temp, 1.0, occupieds[i][1]*temp1);
-               gaxpy(world, 1.0, temp, 1.0/(myc*myc), occupieds[i][2]*temp2);
-               gaxpy(world, 1.0, temp, 1.0/(myc*myc), occupieds[i][3]*temp3);
+               gaxpy(world, 1.0, temp, 1.0/(s_fac2), occupieds[i][2]*temp2);
+               gaxpy(world, 1.0, temp, 1.0/(s_fac2), occupieds[i][3]*temp3);
 
                //truncate before apply phase
                truncate(world, temp);
@@ -624,8 +628,8 @@ void DF::exchange(World& world, real_convolution_3d& op, std::vector<Fcwf>& Kpsi
 
                gaxpy(world, 1.0, temp, 1.0, occupieds[n-1][0]*temp0);
                gaxpy(world, 1.0, temp, 1.0, occupieds[n-1][1]*temp1);
-               gaxpy(world, 1.0, temp, 1.0/(myc*myc), occupieds[n-1][2]*temp2);
-               gaxpy(world, 1.0, temp, 1.0/(myc*myc), occupieds[n-1][3]*temp3);
+               gaxpy(world, 1.0, temp, 1.0/(s_fac2), occupieds[n-1][2]*temp2);
+               gaxpy(world, 1.0, temp, 1.0/(s_fac2), occupieds[n-1][3]*temp3);
 
                truncate(world, temp);
 
@@ -744,7 +748,7 @@ void DF::diagonalize(World& world, real_function_3d& myV, real_convolution_3d& o
      //add in T_psi
      if(world.rank()==0) print("          Adding T*psi");
      for(unsigned int j = 0; j < n; j++){
-          temp_orbitals[j] += apply_T(world, occupieds[j], DFparams.speed_of_light);  //add in "kinetic" term
+          temp_orbitals[j] += apply_T(world, occupieds[j], DFparams.speed_of_light, DFparams.small_comp_factor);  //add in "kinetic" term
      }
 
      //Now that we have F*psi (temp_orbitals), we can get on with integration
@@ -1035,7 +1039,7 @@ void apply_BSH(World& world, Fcwf& Vpsi, const double& eps, const double& small,
 //the derivative operator is faster than application of an integral operator.
 //
 //Empirically this has resulted in no decrease in accuracy, despite reliance on the "noisier" derivative operator
-void apply_BSH_new(World& world, Fcwf& Vpsi, const double& eps, const double& small, const double& thresh, const double& myc){
+void apply_BSH_new(World& world, Fcwf& Vpsi, const double& eps, const double& small, const double& thresh, const double& myc, const double& my_s_fac){
 
      //necessary constants
      double c2 = myc*myc; //speed of light squared
@@ -1054,7 +1058,7 @@ void apply_BSH_new(World& world, Fcwf& Vpsi, const double& eps, const double& sm
      Vpsi = apply(world, op, Vpsi);
 
      //Apply (1/c^2)(H_D + eps) to Vpsi. Using apply_T for convenience, but this requires adding 2c^2Vpsi
-     Vpsi = apply_T(world, Vpsi, myc)*(1.0/c2) + Vpsi * ((eps+2*c2)/c2);
+     Vpsi = apply_T(world, Vpsi, myc, my_s_fac)*(1.0/c2) + Vpsi * ((eps+2*c2)/c2);
 
 }
 
@@ -1354,7 +1358,7 @@ DF::iterate(World &world, real_function_3d &V, real_convolution_3d &op,
      double residualnorm;
 
      //A working FCWF that will have multiple uses
-     Fcwf temp_function(world, DFparams.speed_of_light);
+     Fcwf temp_function(world, DFparams.speed_of_light, DFparams.small_comp_factor);
 
      //Boolean used in while loop.
      bool iterate_again = true; //If initialize to false = assume iterations will stop
@@ -1395,7 +1399,7 @@ DF::iterate(World &world, real_function_3d &V, real_convolution_3d &op,
           temp_function.truncate();
 
           //temp_function now holds (K-V-J)psi, so apply the BSH
-          apply_BSH_new(world,  temp_function, energies[j], DFparams.small, DFparams.thresh, DFparams.speed_of_light);
+          apply_BSH_new(world,  temp_function, energies[j], DFparams.small, DFparams.thresh, DFparams.speed_of_light, DFparams.small_comp_factor);
 
           //truncate
           temp_function.truncate();
@@ -1541,7 +1545,8 @@ DF::iterate(World &world, real_function_3d &V, real_convolution_3d &op,
      double exchange_energy = 0.0;
      double nuclear_attraction_energy = 0.0;
      double old_total_energy = total_energy;
-     double myc = DFparams.speed_of_light;
+     double s_fac = DFparams.small_comp_factor;
+     double s_fac2 = s_fac * s_fac;
      Tensor<double> nuclear_attraction_tensor;
      Tensor<double> coulomb_tensor;
      Tensor<double> exchange_tensor;
@@ -1575,8 +1580,8 @@ DF::iterate(World &world, real_function_3d &V, real_convolution_3d &op,
      }
      nuclear_attraction_tensor = real(inner(world,occupieds1,mul(world,V,occupieds1)));
      nuclear_attraction_tensor += real(inner(world,occupieds2,mul(world,V,occupieds2)));
-     nuclear_attraction_tensor += real(inner(world,occupieds3,mul(world,V,occupieds3)))*(1.0/(myc*myc));
-     nuclear_attraction_tensor += real(inner(world,occupieds4,mul(world,V,occupieds4)))*(1.0/(myc*myc));
+     nuclear_attraction_tensor += real(inner(world,occupieds3,mul(world,V,occupieds3)))*(1.0/(s_fac2));
+     nuclear_attraction_tensor += real(inner(world,occupieds4,mul(world,V,occupieds4)))*(1.0/(s_fac2));
      nuclear_attraction_energy = fac*nuclear_attraction_tensor.sum();
      if(!closed_shell and DFparams.Krestricted) nuclear_attraction_energy -= nuclear_attraction_tensor(Init_params.num_occupied-1);
      
@@ -1588,8 +1593,8 @@ DF::iterate(World &world, real_function_3d &V, real_convolution_3d &op,
      //   In the Kramers-restricted open-shell case, the doubling doesn't apply to the last orbital, so we subtract the excess
      coulomb_tensor = real(inner(world,occupieds1,mul(world,Jop,occupieds1)));
      coulomb_tensor += real(inner(world,occupieds2,mul(world,Jop,occupieds2)));
-     coulomb_tensor += real(inner(world,occupieds3,mul(world,Jop,occupieds3)))*(1.0/(myc*myc));
-     coulomb_tensor += real(inner(world,occupieds4,mul(world,Jop,occupieds4)))*(1.0/(myc*myc));
+     coulomb_tensor += real(inner(world,occupieds3,mul(world,Jop,occupieds3)))*(1.0/(s_fac2));
+     coulomb_tensor += real(inner(world,occupieds4,mul(world,Jop,occupieds4)))*(1.0/(s_fac2));
      coulomb_energy = coulomb_tensor.sum()*(fac/2.0);
      if(!closed_shell and DFparams.Krestricted) coulomb_energy -= 0.5*coulomb_tensor(Init_params.num_occupied-1);
      
@@ -1606,8 +1611,8 @@ DF::iterate(World &world, real_function_3d &V, real_convolution_3d &op,
      }
      exchange_tensor = real(inner(world,occupieds1,Kpsis1));
      exchange_tensor += real(inner(world,occupieds2,Kpsis2));
-     exchange_tensor += real(inner(world,occupieds3,Kpsis3))*(1.0/(myc*myc));
-     exchange_tensor += real(inner(world,occupieds4,Kpsis4))*(1.0/(myc*myc));
+     exchange_tensor += real(inner(world,occupieds3,Kpsis3))*(1.0/(s_fac2));
+     exchange_tensor += real(inner(world,occupieds4,Kpsis4))*(1.0/(s_fac2));
      exchange_energy = exchange_tensor.sum()*(fac/2.0);
      if(!closed_shell and DFparams.Krestricted) exchange_energy -= 0.5*exchange_tensor(Init_params.num_occupied-1);
 
@@ -1656,8 +1661,8 @@ DF::iterate(World &world, real_function_3d &V, real_convolution_3d &op,
           //Compute and store norms of each component. Remember to scale small component by c
           comp1norm[j] = occupieds[j][0].norm2();
           comp2norm[j] = occupieds[j][1].norm2();
-          comp3norm[j] = occupieds[j][2].norm2()/myc;
-          comp4norm[j] = occupieds[j][3].norm2()/myc;
+          comp3norm[j] = occupieds[j][2].norm2()/s_fac;
+          comp4norm[j] = occupieds[j][3].norm2()/s_fac;
 
      }
 
@@ -1711,7 +1716,7 @@ void DF::solve_occupied(World & world)
      real_convolution_3d op = CoulombOperator(world,DFparams.small,DFparams.thresh);
 
      //allocator is useful to have, but also required for use of KAIN
-     Fcwf_vector_allocator allocator(world, Init_params.num_occupied, DFparams.speed_of_light);
+     Fcwf_vector_allocator allocator(world, Init_params.num_occupied, DFparams.speed_of_light, DFparams.small_comp_factor);
 
      //initialize kain solver
      XNonlinearSolver<std::vector<Fcwf>, std::complex<double>, Fcwf_vector_allocator> kainsolver(allocator);

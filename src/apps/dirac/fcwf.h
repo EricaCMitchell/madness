@@ -12,25 +12,27 @@ using namespace madness;
 class Fcwf{
      std::vector<complex_function_3d> m_psi;
      double speed_of_light;
+     double s_fac;
      bool m_initialized;
 
 public:
-     
+
      Fcwf();
 
      Fcwf(const complex_function_3d& wf1,
           const complex_function_3d& wf2,
           const complex_function_3d& wf3,
           const complex_function_3d& wf4,
-          const double myc);
+          const double myc,
+          const double my_s_fac);
 
-     Fcwf(World& world, const double myc);
+     Fcwf(World& world, const double myc, const double my_s_fac);
 
      complex_function_3d& operator[](const int i);
 
      const complex_function_3d& operator[](const int i) const ;
-     
-     explicit Fcwf(std::vector<complex_function_3d>& phi, const double myc);
+
+     explicit Fcwf(std::vector<complex_function_3d>& phi, const double myc, const double my_s_fac);
 
      bool getinitialize();
 
@@ -40,11 +42,15 @@ public:
 
      double get_myc() const ;
 
+     double get_small_comp_factor();
+
+     double get_small_comp_factor() const ;
+
      unsigned int size();
 
      unsigned int size() const ;
 
-     Fcwf(const Fcwf& phi, const double myc);
+     Fcwf(const Fcwf& phi, const double myc, const double my_s_fac);
 
      Fcwf operator=(const Fcwf& phi);
 
@@ -119,9 +125,10 @@ class Fcwf_vector_allocator {
      World& world;
      unsigned int m_size;
      double speed_of_light;
+     double s_fac;
      public:
           //Constructor
-          Fcwf_vector_allocator(World& world, unsigned int m_size, const double& myc);
+          Fcwf_vector_allocator(World& world, unsigned int m_size, const double& myc, const double& my_s_fac);
 
           //Overloading () operator
           std::vector<Fcwf> operator()();

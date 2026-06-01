@@ -1,9 +1,11 @@
 #include "fcwf.h"
 
 //Fcwf (Four component wavefunction) implementation file
-//NOTE: The small component of an Fcwf is scaled by c and then stored
-//This means that when computing properties and some other operations,
-//care must be taken to remove the extra factors of c in the result
+//NOTE: The small component of an Fcwf is scaled by s_fac and then stored.
+//By default s_fac == speed_of_light (c), recovering the standard convention
+//stored_small = c * physical_small.  When a different small_comp_factor is set (e.g. for
+//the kinetic-balance initial guess), norms and inner products divide by s_fac^2
+//instead of c^2 to correctly remove the extra scale.
 
 using namespace madness;
 
@@ -17,7 +19,8 @@ Fcwf::Fcwf(const complex_function_3d& wf1,
      const complex_function_3d& wf2,
      const complex_function_3d& wf3,
      const complex_function_3d& wf4,
-     const double myc){
+     const double myc,
+     const double my_s_fac){
      MADNESS_ASSERT(m_psi.size() == 0);
      m_psi.push_back(wf1);
      m_psi.push_back(wf2);
@@ -25,16 +28,18 @@ Fcwf::Fcwf(const complex_function_3d& wf1,
      m_psi.push_back(wf4);
      m_initialized = true;
      speed_of_light = myc;
+     s_fac = my_s_fac;
 }
 
 //This constructor creates a zero Fcwf
-Fcwf::Fcwf(World& world, const double myc){
+Fcwf::Fcwf(World& world, const double myc, const double my_s_fac){
      MADNESS_ASSERT(m_psi.size() == 0);
      for(int i = 0 ; i < 4 ; i ++){
           m_psi.push_back(complex_factory_3d(world));
      }
      m_initialized = true;
      speed_of_light = myc;
+     s_fac = my_s_fac;
 }
 
 //give access to the individual components
@@ -50,8 +55,8 @@ const complex_function_3d& Fcwf::operator[](const int i) const {
      return m_psi[i];
 }
 
-//Can also initialize from a vector of complex functions
-Fcwf::Fcwf(std::vector<complex_function_3d>& phi, const double myc){
+//Vector constructor with explicit small-component scale factor
+Fcwf::Fcwf(std::vector<complex_function_3d>& phi, const double myc, const double my_s_fac){
      MADNESS_ASSERT(m_psi.size() == 0);
      MADNESS_ASSERT(phi.size() == 4);
      for(int i = 0 ; i < 4 ; i++){
@@ -59,6 +64,7 @@ Fcwf::Fcwf(std::vector<complex_function_3d>& phi, const double myc){
      }
      m_initialized=true;
      speed_of_light = myc;
+     s_fac = my_s_fac;
 }
 
 //learn whether an Fcwf is initialized
@@ -81,6 +87,16 @@ double Fcwf::get_myc() const {
      return speed_of_light;
 }
 
+double Fcwf::get_small_comp_factor(){
+     MADNESS_ASSERT(m_initialized);
+     return s_fac;
+}
+
+double Fcwf::get_small_comp_factor() const {
+     MADNESS_ASSERT(m_initialized);
+     return s_fac;
+}
+
 //Probably don't need this, but get the size of m_psi, which should only be 0 or 4
 unsigned int Fcwf::size(){
      MADNESS_ASSERT(m_initialized);
@@ -94,7 +110,7 @@ unsigned int Fcwf::size() const {
 
 //copy constructor defaults to deep copy
 //if this ever changes, you will need to change the copy() function, as it calls this
-Fcwf::Fcwf(const Fcwf& phi, const double myc){
+Fcwf::Fcwf(const Fcwf& phi, const double myc, const double my_s_fac){
      MADNESS_ASSERT(m_psi.size() == 0);
      MADNESS_ASSERT(phi.size() == 4);
      for(int i = 0 ; i < 4 ; i++){
@@ -102,6 +118,7 @@ Fcwf::Fcwf(const Fcwf& phi, const double myc){
      }
      m_initialized = true;
      speed_of_light = myc;
+     s_fac = my_s_fac;
 }
 
 //Assignment operator defaults to shallow copy
@@ -109,6 +126,7 @@ Fcwf Fcwf::operator=(const Fcwf& phi){
      m_psi = phi.m_psi;
      m_initialized = phi.m_initialized;
      speed_of_light = phi.speed_of_light;
+     s_fac = phi.s_fac;
      return *this;
 }
 
@@ -127,7 +145,7 @@ Fcwf Fcwf::operator-(const Fcwf& phi) const {
                temp[i].scale(-1.0);
           }
      }
-     return Fcwf(temp, phi.speed_of_light);
+     return Fcwf(temp, phi.speed_of_light, phi.s_fac);
 }
 
 //add two Fcwfs. The Fcwf being added must be initialized
@@ -144,7 +162,7 @@ Fcwf Fcwf::operator+(const Fcwf& phi){
                temp.push_back(copy(phi[i]));
           }
      }
-     return Fcwf(temp, phi.speed_of_light);
+     return Fcwf(temp, phi.speed_of_light, phi.s_fac);
 }
 
 //multiply an Fcwf by a complex number a
@@ -154,7 +172,7 @@ Fcwf Fcwf::operator*(std::complex<double> a) const {
      for(int i = 0 ; i < 4 ; i++){
           temp[i] = a*m_psi[i];    
      }
-     return Fcwf(temp, speed_of_light);
+     return Fcwf(temp, speed_of_light, s_fac);
 }
 
 //scale an Fcwf in place by a complex number a
@@ -205,15 +223,15 @@ Fcwf Fcwf::operator-=(const Fcwf& phi){
 //Returns the 2-norm of an initialized Fcwf
 double Fcwf::norm2(){
      MADNESS_ASSERT(m_initialized);
-     double c2 = speed_of_light * speed_of_light; //speed of light in atomic units from CODATA 2022
+     double s_fac2 = s_fac * s_fac;
      std::complex<double> temp(0,0);
 
      temp += madness::inner(m_psi[0],m_psi[0]);
      temp += madness::inner(m_psi[1],m_psi[1]);
 
-     //Small component is stored with an additional factor of c, so remove it here
-     temp += madness::inner(m_psi[2],m_psi[2])/c2;
-     temp += madness::inner(m_psi[3],m_psi[3])/c2;
+     //Small component is stored with an additional factor of s_fac, so remove it here
+     temp += madness::inner(m_psi[2],m_psi[2])/s_fac2;
+     temp += madness::inner(m_psi[3],m_psi[3])/s_fac2;
 
      return std::sqrt(std::real(temp));
 }
@@ -235,7 +253,7 @@ Fcwf Fcwf::operator*(madness::complex_function_3d& phi){
      for(int i = 0 ; i < 4 ; i++){
           temp[i] = phi*m_psi[i];
      }
-     return Fcwf(temp, speed_of_light);
+     return Fcwf(temp, speed_of_light, s_fac);
 }
 
 Fcwf Fcwf::operator*(madness::real_function_3d& phi){
@@ -244,7 +262,7 @@ Fcwf Fcwf::operator*(madness::real_function_3d& phi){
      for(int i = 0 ; i < 4 ; i++){
           temp[i] = phi*m_psi[i];
      }
-     return Fcwf(temp, speed_of_light);
+     return Fcwf(temp, speed_of_light, s_fac);
 }
 
 //truncate
@@ -258,15 +276,15 @@ void Fcwf::truncate(){
 //Returns the inner product of two Fcwfs
 std::complex<double> Fcwf::inner(World& world, const Fcwf& phi) const{
      MADNESS_ASSERT(m_initialized && phi.getinitialize());
-     double c2 = speed_of_light * speed_of_light; //speed of light in atomic units from CODATA 2022
+     double s_fac2 = s_fac * s_fac;
      std::complex<double> temp(0,0);
 
      temp += madness::inner(m_psi[0],phi.m_psi[0]);
      temp += madness::inner(m_psi[1],phi.m_psi[1]);
 
-     //Small component is stored with an extra factor of c, so remove that here
-     temp += madness::inner(m_psi[2],phi.m_psi[2])/c2;
-     temp += madness::inner(m_psi[3],phi.m_psi[3])/c2;
+     //Small component is stored with an extra factor of s_fac, so remove that here
+     temp += madness::inner(m_psi[2],phi.m_psi[2])/s_fac2;
+     temp += madness::inner(m_psi[3],phi.m_psi[3])/s_fac2;
 
      return temp;
 }
@@ -288,7 +306,7 @@ Fcwf Fcwf::KramersPair(){
      complex_function_3d phi1 = conj(m_psi[0]);
      complex_function_3d phi2 = -1.0*conj(m_psi[3]);
      complex_function_3d phi3 = conj(m_psi[2]);
-     return Fcwf(phi0,phi1,phi2,phi3,speed_of_light);
+     return Fcwf(phi0, phi1, phi2, phi3, speed_of_light, s_fac);
 }
 
 //function for computing the inner product of two Fcwfs
@@ -314,16 +332,16 @@ Fcwf apply(World& world, complex_derivative_3d& D, const Fcwf& psi){
 //Returns the square modulus of an Fcwf, which is a real function
 real_function_3d squaremod(Fcwf& psi){
      MADNESS_ASSERT(psi.getinitialize());
-     double c2 = psi.get_myc() * psi.get_myc(); //speed of light in atomic units from CODATA 2022
-     real_function_3d temp = abssq(psi[0]) + abssq(psi[1]) + abssq(psi[2]).scale(1.0/c2) + abssq(psi[3]).scale(1.0/c2);
+     double s_fac2 = psi.get_small_comp_factor() * psi.get_small_comp_factor();
+     real_function_3d temp = abssq(psi[0]) + abssq(psi[1]) + abssq(psi[2]).scale(1.0/s_fac2) + abssq(psi[3]).scale(1.0/s_fac2);
      return temp;
 }
 
 //Returns the square modulus of the small component of an Fcwf, which is a real function
 real_function_3d squaremod_small(Fcwf& psi){
      MADNESS_ASSERT(psi.getinitialize());
-     double c2 = psi.get_myc() * psi.get_myc(); //speed of light in atomic units from CODATA 2022
-     real_function_3d temp = (abssq(psi[2]) + abssq(psi[3])).scale(1.0/c2); //don't forget the factor of c^2
+     double s_fac2 = psi.get_small_comp_factor() * psi.get_small_comp_factor();
+     real_function_3d temp = (abssq(psi[2]) + abssq(psi[3])).scale(1.0/s_fac2);
      return temp;
 }
 
@@ -337,27 +355,27 @@ real_function_3d squaremod_large(Fcwf& psi){
 //compute the function inner product between two Fcwfs. Result is a complex function.
 complex_function_3d inner_func(World& world, Fcwf& psi, Fcwf& phi){
      MADNESS_ASSERT(psi.getinitialize() && phi.getinitialize());
-     double c = psi.get_myc(); //speed of light in atomic units from CODATA 2022
+     double s_fac = psi.get_small_comp_factor();
      std::vector<complex_function_3d> a(4);
      std::vector<complex_function_3d> b(4);
      for(unsigned int i = 0; i < 2; i++){
           a[i] = psi[i];
           b[i] = phi[i];
      }
-     //Small components are stored with an extra factor of c, so remove those here
+     //Small components are stored with an extra factor of s_fac, so remove those here
      for(unsigned int i = 2; i < 4; i++){
-          a[i] = copy(psi[i]).scale(1.0/c);
-          b[i] = copy(phi[i]).scale(1.0/c);
+          a[i] = copy(psi[i]).scale(1.0/s_fac);
+          b[i] = copy(phi[i]).scale(1.0/s_fac);
      }
      //vmra function call takes care of the rest
-     complex_function_3d result = sum(world, mul(world, conj(world, a), b)); 
+     complex_function_3d result = sum(world, mul(world, conj(world, a), b));
      return result;
 }
 
 //deep copy of an Fcwf
 Fcwf copy(Fcwf psi){
      MADNESS_ASSERT(psi.getinitialize());
-     return Fcwf(psi, psi.get_myc());
+     return Fcwf(psi, psi.get_myc(), psi.get_small_comp_factor());
 
 }
 
@@ -424,24 +442,25 @@ std::vector<Fcwf> operator-(const std::vector<Fcwf>& phi, const std::vector<Fcwf
 }
 
 //Constructor for allocator for vector of Fcwfs
-Fcwf_vector_allocator::Fcwf_vector_allocator(World& world, unsigned int m_size, const double& myc)
+Fcwf_vector_allocator::Fcwf_vector_allocator(World& world, unsigned int m_size, const double& myc, const double& my_s_fac)
 : world(world)
 , m_size(m_size)
 , speed_of_light(myc)
+, s_fac(my_s_fac)
 {}
 
 //Overloading () operator
 std::vector<Fcwf> Fcwf_vector_allocator::operator()(){
      std::vector<Fcwf> result;
      for(int i=0; i < m_size; i++){
-          result.push_back(Fcwf(world, speed_of_light));
+          result.push_back(Fcwf(world, speed_of_light, s_fac));
      }
      return result;
 }
 
 //Copy Constructor for allocator. Necessary for KAIN
 Fcwf_vector_allocator Fcwf_vector_allocator::operator=(const Fcwf_vector_allocator& other){
-     Fcwf_vector_allocator tmp(world, other.m_size, speed_of_light);
+     Fcwf_vector_allocator tmp(world, other.m_size, speed_of_light, s_fac);
      return tmp;
 }
 
@@ -455,7 +474,8 @@ Tensor<std::complex<double>> matrix_inner(World& world, std::vector<Fcwf>& a, st
      unsigned int m = b.size();
      //MADNESS_ASSERT(n==m);
 
-     double c2 = a[0].get_myc() * a[0].get_myc(); //speed of light in atomic units from CODATA 2022
+     double s_fac = a[0].get_small_comp_factor();
+     double s_fac2 = s_fac * s_fac;
 
      //Reassign the vectors of Fcwfs to vectors of complex functions to facilitate use of vmra functions
      std::vector<complex_function_3d> a_1(n); //all first components of Fcwfs in input a
@@ -484,9 +504,9 @@ Tensor<std::complex<double>> matrix_inner(World& world, std::vector<Fcwf>& a, st
      Tensor<std::complex<double>> component1 = matrix_inner(world, a_1, b_1);
      Tensor<std::complex<double>> component2 = matrix_inner(world, a_2, b_2);
 
-     //don't forget that small components are scaled by c
-     Tensor<std::complex<double>> component3 = (1.0/c2)*matrix_inner(world, a_3, b_3);
-     Tensor<std::complex<double>> component4 = (1.0/c2)*matrix_inner(world, a_4, b_4);
+     //don't forget that small components are scaled by s_fac
+     Tensor<std::complex<double>> component3 = (1.0/s_fac2)*matrix_inner(world, a_3, b_3);
+     Tensor<std::complex<double>> component4 = (1.0/s_fac2)*matrix_inner(world, a_4, b_4);
 
      //add
      component1=component1+component2+component3+component4;
@@ -522,7 +542,7 @@ std::vector<Fcwf> transform(World& world, std::vector<Fcwf>& a, Tensor<std::comp
 
      //Now put the components back into Fcwf form and push back into a vector
      std::vector<Fcwf> result;
-     Fcwf reader(world, a[0].get_myc()); 
+     Fcwf reader(world, a[0].get_myc(), a[0].get_small_comp_factor()); 
      for(unsigned int i = 0; i < k; i++){
           reader[0] = a_1[i];
           reader[1] = a_2[i];

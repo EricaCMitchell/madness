@@ -44,6 +44,7 @@ namespace madness {
           double speed_of_light;       ///< speed_of_light in au (default: 137.03599917697017 CODATA2022)
           int min_iter;                ///< minimum number of iterations (default: 2)
           bool Krestricted;            ///< Calculation should be performed in Kramers-restricted manner (default: false)
+          double small_comp_factor;    ///< Scale factor for kinetic-balance small-component guess: small_comp_factor / (2 * c) (default: speed_of_light, recovering scale of 0.5)
           //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
           //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
           //               If you add something here, don't forget to add it to serializable!
@@ -52,7 +53,7 @@ namespace madness {
 
           template<typename Archive>
           void serialize(Archive& ar){
-               ar & archive & job & max_iter & small & thresh & k & kain & maxsub & maxrotn & restart & nucleus & do_save & savefile & lb_iter & nwchem & lineplot & no_compute & bohr_rad & min_iter & Krestricted;
+               ar & archive & job & max_iter & small & thresh & k & kain & maxsub & maxrotn & restart & nucleus & do_save & savefile & lb_iter & nwchem & lineplot & no_compute & bohr_rad & min_iter & Krestricted & small_comp_factor;
           }
 
           // Default constructor
@@ -78,6 +79,7 @@ namespace madness {
           , speed_of_light(137.03599917697017) // speed of light in atomic units from CODATA 2022
           , min_iter(2)
           , Krestricted(false)
+          , small_comp_factor(137.03599917697017) // defaults to speed_of_light, giving scale 0.5/c = 1/(2c)
           {}
 
           // Initializes DFParameters using the contents of file \c filename
@@ -162,6 +164,9 @@ namespace madness {
                     else if (s == "Krestricted"){
                          Krestricted = true;
                     }
+                    else if (s == "small_comp_factor"){
+                         f >> small_comp_factor;
+                    }
                     else{
                        std::cout << "Dirac Fock: unrecognized input keyword " << s << std::endl;
                        MADNESS_EXCEPTION("input error", 0); 
@@ -195,6 +200,7 @@ namespace madness {
                     madness::print("                       Nucleus: gaussian");
                }
                madness::print("           Kramers restriction:", Krestricted);
+               madness::print("        Small component factor:", small_comp_factor);
                madness::print("                  Do Lineplots:", lineplot);
           }
      };
