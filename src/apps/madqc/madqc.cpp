@@ -32,7 +32,6 @@
 #if defined(HAVE_SYS_TYPES_H) && defined(HAVE_SYS_STAT_H) &&                   \
     defined(HAVE_UNISTD_H)
 
-#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -44,6 +43,8 @@
 // }
 
 #endif
+
+#include <sys/resource.h>
 
 #include <madness/misc/info.h>
 #include <madness/world/ranks_and_hosts.h>
