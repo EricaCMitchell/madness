@@ -36,12 +36,17 @@
 #include <madness/madness_config.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <queue>
+#include <sstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <madness/world/atomicint.h>
 #include <madness/world/worlddc.h>
@@ -60,6 +65,206 @@ namespace madness {
 
 	template<typename T, std::size_t NDIM>
 	class Function;
+
+    /// Evaluation only: the assignment that MAD_LB_EXPERIMENT_ALGORITHM selects
+    enum class LBExperimentAlgorithm { LPT, SFC };
+
+    namespace detail {
+
+        struct CostPerProc {
+            double cost;
+            int proc;
+            CostPerProc() : cost(0.0), proc(0) {}
+            CostPerProc(double cost, int proc) : cost(cost), proc(proc) {}
+            bool operator<(const CostPerProc& other) const {
+                return cost > other.cost;  // Want ascending order
+            }
+        };
+
+        /// Used to sort subtrees into descending order
+        template <std::size_t NDIM>
+        bool subtree_cost_less(const std::pair<Key<NDIM>,double>& a, const std::pair<Key<NDIM>,double>& b) {
+            return a.second < b.second;
+        }
+
+        /// Longest-processing-time assignment: the bin packing that load_balance() always used
+        template <std::size_t NDIM>
+        std::vector<std::pair<Key<NDIM>,ProcessID>> assign_lpt(std::vector<std::pair<Key<NDIM>,double>> subtrees,
+                                                               ProcessID nproc) {
+            MADNESS_CHECK_THROW(nproc > 0, "assign_lpt: nproc must be positive");
+            std::sort(subtrees.begin(), subtrees.end(), subtree_cost_less<NDIM>);
+
+            std::vector<std::pair<Key<NDIM>,ProcessID>> map;
+            map.reserve(subtrees.size());
+
+            // Shove the first nproc entries directly into the queue
+            std::priority_queue<CostPerProc> costs;
+            for (ProcessID p=0; p<nproc && !subtrees.empty(); ++p) {
+                const std::pair<Key<NDIM>,double>& f = subtrees.back();
+                costs.push(CostPerProc(f.second,p));
+                map.push_back(std::make_pair(f.first,p));
+                subtrees.pop_back();
+            }
+
+            // Process the remainder using the sorting maintained by the priority queue
+            while (!subtrees.empty()) {
+                const std::pair<Key<NDIM>,double>& f = subtrees.back();
+                CostPerProc top = costs.top();
+                costs.pop();
+                top.cost += f.second;
+                costs.push(top);
+                map.push_back(std::make_pair(f.first,top.proc));
+                subtrees.pop_back();
+            }
+            return map;
+        }
+
+        /// @return The child index of key at the given depth, for 1 <= depth <= key.level().
+        /// Dimension i is bit i of the child index.
+        template <std::size_t NDIM>
+        unsigned int morton_child_index(const Key<NDIM>& key, const Level depth) {
+            const Level bit = key.level() - depth;
+            unsigned int index = 0;
+            for (std::size_t i=0; i<NDIM; ++i) {
+                index |= static_cast<unsigned int>((key.translation()[i] >> bit) & 0x1) << i;
+            }
+            return index;
+        }
+
+        /// Adaptive Morton order: lexicographic order of the root-to-key child indices. If one
+        /// sequence is a prefix of the other, the shorter one is the ancestor and sorts first.
+        template <std::size_t NDIM>
+        bool morton_less(const Key<NDIM>& a, const Key<NDIM>& b) {
+            const Level common = std::min(a.level(), b.level());
+            for (Level depth=1; depth<=common; ++depth) {
+                const unsigned int ia = morton_child_index(a, depth);
+                const unsigned int ib = morton_child_index(b, depth);
+                if (ia != ib) return ia < ib;
+            }
+            return a.level() < b.level();
+        }
+
+        /// @param[in] prefix Nondecreasing cumulative costs
+        /// @param[in] begin The cut of the previous run. A nearer cut cannot be below this index,
+        /// because the targets increase and prefix does not decrease.
+        /// @return The lowest index in [begin, prefix.size()) that is nearest to target
+        inline std::size_t nearest_cut(const std::vector<double>& prefix, const std::size_t begin, const double target) {
+            const auto first = prefix.begin() + begin;
+            auto above = std::lower_bound(first, prefix.end(), target);
+            if (above == prefix.end()) --above;
+            if (above == first) return begin;
+            const auto below = std::lower_bound(first, above, *(above - 1));
+            const bool above_is_nearer = std::abs(*above - target) < std::abs(*below - target);
+            return static_cast<std::size_t>((above_is_nearer ? above : below) - prefix.begin());
+        }
+
+        /// Sorts the subtrees in adaptive Morton order and assigns run k to rank k. A negative cost
+        /// counts as zero. A run can be empty, in particular if nproc exceeds the subtree count.
+        template <std::size_t NDIM>
+        std::vector<std::pair<Key<NDIM>,ProcessID>> assign_sfc(std::vector<std::pair<Key<NDIM>,double>> subtrees,
+                                                               ProcessID nproc) {
+            MADNESS_CHECK_THROW(nproc > 0, "assign_sfc: nproc must be positive");
+            std::sort(subtrees.begin(), subtrees.end(),
+                      [](const std::pair<Key<NDIM>,double>& a, const std::pair<Key<NDIM>,double>& b) {
+                          return morton_less(a.first, b.first);
+                      });
+
+            const std::size_t nsubtree = subtrees.size();
+            std::vector<double> prefix(nsubtree + 1, 0.0);
+            for (std::size_t i=0; i<nsubtree; ++i) {
+                prefix[i+1] = prefix[i] + std::max(0.0, subtrees[i].second);
+            }
+            const double total = prefix[nsubtree];
+
+            std::vector<std::pair<Key<NDIM>,ProcessID>> map;
+            map.reserve(nsubtree);
+            std::size_t begin = 0;
+            for (ProcessID k=0; k<nproc; ++k) {
+                const std::size_t next = static_cast<std::size_t>(k) + 1;
+                std::size_t end = nsubtree;
+                if (next < static_cast<std::size_t>(nproc)) {
+                    end = (total > 0.0) ? nearest_cut(prefix, begin, next * total / nproc)
+                                        : next * nsubtree / nproc;
+                }
+                for (std::size_t i=begin; i<end; ++i) map.push_back(std::make_pair(subtrees[i].first, k));
+                begin = end;
+            }
+            return map;
+        }
+
+        /// The load of an assignment. A negative cost counts as zero.
+        struct LBAssignmentMetrics {
+            double total_cost = 0.0;
+            double max_subtree_cost = 0.0;
+            double max_rank_cost = 0.0;
+            double bound = 0.0;       ///< total_cost / nproc + max_subtree_cost
+            bool bound_ok = false;    ///< max_rank_cost is within the bound, with tolerance 1e-12
+            std::vector<double> rank_costs;
+        };
+
+        template <std::size_t NDIM>
+        LBAssignmentMetrics lb_assignment_metrics(const std::vector<std::pair<Key<NDIM>,double>>& subtrees,
+                                                  const std::vector<std::pair<Key<NDIM>,ProcessID>>& assignment,
+                                                  const ProcessID nproc) {
+            const std::unordered_map<Key<NDIM>,ProcessID,Hash<Key<NDIM>>> owner(assignment.begin(), assignment.end());
+            LBAssignmentMetrics metrics;
+            metrics.rank_costs.assign(nproc, 0.0);
+            for (const auto& subtree : subtrees) {
+                const double cost = std::max(0.0, subtree.second);
+                metrics.rank_costs[owner.at(subtree.first)] += cost;
+                metrics.total_cost += cost;
+                metrics.max_subtree_cost = std::max(metrics.max_subtree_cost, cost);
+            }
+            metrics.max_rank_cost = *std::max_element(metrics.rank_costs.begin(), metrics.rank_costs.end());
+            metrics.bound = metrics.total_cost / nproc + metrics.max_subtree_cost;
+            metrics.bound_ok = metrics.max_rank_cost <= metrics.bound * (1.0 + 1.e-12);
+            return metrics;
+        }
+
+        /// Collective. Rank 0 reads MAD_LB_EXPERIMENT_ALGORITHM and broadcasts it, so all ranks
+        /// agree, and no rank is left in a later collective if the value is not valid.
+        /// @return The selected algorithm, or nullopt if the variable is not set
+        /// @throw MadnessException on every rank if the value is not valid
+        inline std::optional<LBExperimentAlgorithm> select_lb_experiment_algorithm(World& world) {
+            std::string value;
+            if (world.rank() == 0) {
+                if (const char* env = std::getenv("MAD_LB_EXPERIMENT_ALGORITHM")) value = env;
+            }
+            world.gop.broadcast_serializable(value, 0);
+            if (value.empty()) return std::nullopt;
+            if (value == "lpt") return LBExperimentAlgorithm::LPT;
+            if (value == "sfc") return LBExperimentAlgorithm::SFC;
+            if (world.rank() == 0) madness::print("MAD_LB_EXPERIMENT_ALGORITHM has the rejected value", value);
+            MADNESS_EXCEPTION("invalid MAD_LB_EXPERIMENT_ALGORITHM", 0);
+        }
+
+        inline const char* lb_experiment_name(const LBExperimentAlgorithm algorithm) {
+            return (algorithm == LBExperimentAlgorithm::SFC) ? "sfc" : "lpt";
+        }
+
+        /// Rank 0 counts the load_balance() calls that the selector reports
+        inline long lb_experiment_call_index = 0;
+
+        inline void report_lb_assignment(const LBExperimentAlgorithm algorithm, const std::size_t nsubtree,
+                                         const double seconds, const LBAssignmentMetrics& metrics) {
+            std::ostringstream line;
+            line << std::setprecision(17) << "LBEXP_ASSIGN call=" << lb_experiment_call_index++
+                 << " algorithm=" << lb_experiment_name(algorithm)
+                 << " subtrees=" << nsubtree
+                 << " seconds=" << seconds
+                 << " total_cost=" << metrics.total_cost
+                 << " max_subtree_cost=" << metrics.max_subtree_cost
+                 << " max_rank_cost=" << metrics.max_rank_cost
+                 << " bound=" << metrics.bound
+                 << " bound_ok=" << (metrics.bound_ok ? "true" : "false")
+                 << " rank_costs=";
+            for (std::size_t p=0; p<metrics.rank_costs.size(); ++p) {
+                line << (p == 0 ? "" : ",") << metrics.rank_costs[p];
+            }
+            std::cout << line.str() << std::endl;
+        }
+
+    } // namespace detail
 
     template <std::size_t NDIM>
     class LBDeuxPmap : public WorldDCPmapInterface< Key<NDIM> > {
@@ -297,12 +502,6 @@ namespace madness {
             return total;
         }
 
-        /// Used to sort results into descending order
-        static bool compare(const std::pair<keyT,double>& a, const std::pair<keyT,double>& b) {
-            return a.second < b.second;
-        }
-
-
     public:
         LoadBalanceDeux(World& world)
                 : world(world)
@@ -396,16 +595,6 @@ namespace madness {
             os.precision(saved_prec);
         }
 
-        struct CostPerProc {
-            double cost;
-            int proc;
-            CostPerProc() : cost(0.0), proc(0) {}
-            CostPerProc(double cost, int proc) : cost(cost), proc(proc) {}
-            bool operator<(const CostPerProc& other) const {
-                return cost > other.cost;  // Want ascending order
-            }
-        };
-
         /// Actually does the partitioning of the tree
         std::shared_ptr< WorldDCPmapInterface<keyT> > load_balance(double fac = 1.0, bool printstuff=false) {
             world.gop.fence();
@@ -432,47 +621,34 @@ namespace madness {
             results = world.gop.concat0(results, 128*1024*1024);
             world.gop.fence();
 
+            // Every rank observes the value of rank 0 before any rank-specific assignment path
+            const std::optional<LBExperimentAlgorithm> experiment = detail::select_lb_experiment_algorithm(world);
+
             std::vector< std::pair<keyT,ProcessID> > map;
 
             if (world.rank() == 0) {
-
-                std::sort(results.begin(), results.end(), compare);
+                const ProcessID nproc = world.size();
                 if (printstuff) {
+                    std::vector< std::pair<keyT,double> > sorted = results;
+                    std::sort(sorted.begin(), sorted.end(), detail::subtree_cost_less<NDIM>);
                     print("THESE ARE THE INITIAL SUBTREES");
-                    for (unsigned int i=0; i<results.size(); ++i) print(i,results[i]);
+                    for (unsigned int i=0; i<sorted.size(); ++i) print(i,sorted[i]);
                 }
 
-                // Now use bin packing to cram the results together
-                map.reserve(results.size());
+                const double start = wall_time();
+                map = (experiment == LBExperimentAlgorithm::SFC) ? detail::assign_sfc<NDIM>(results, nproc)
+                                                                 : detail::assign_lpt<NDIM>(results, nproc);
+                const double seconds = wall_time() - start;
 
-                // Shove the first nproc entries directly into the queue
-                unsigned int nproc = world.size();
-                std::priority_queue<CostPerProc> costs;
-                for (unsigned int p=0; p<nproc && !results.empty(); ++p) {
-                    const std::pair<keyT,double>& f = results.back();
-                    costs.push(CostPerProc(f.second,p));
-                    map.push_back(std::make_pair(f.first,p));
-                    results.pop_back();
-                }
-
-                // Process the remainder using the sorting maintained by the priority queue
-                while (!results.empty()) {
-                    const std::pair<keyT,double>& f = results.back();
-                    CostPerProc top = costs.top();
-                    costs.pop();
-                    top.cost += f.second;
-                    costs.push(top);
-                    map.push_back(std::make_pair(f.first,top.proc));
-                    results.pop_back();
-                }
-                if (printstuff) {
-                    print("THIS IS THE MAP");
-                    print(map);
-                    print("THESE ARE THE COSTS PER PROCESSOR");
-                    while (!costs.empty()) {
-                        print(costs.top().proc,costs.top().cost);
-                        costs.pop();
+                if (printstuff || experiment) {
+                    const detail::LBAssignmentMetrics metrics = detail::lb_assignment_metrics<NDIM>(results, map, nproc);
+                    if (printstuff) {
+                        print("THIS IS THE MAP");
+                        print(map);
+                        print("THESE ARE THE COSTS PER PROCESSOR");
+                        for (ProcessID p=0; p<nproc; ++p) print(p,metrics.rank_costs[p]);
                     }
+                    if (experiment) detail::report_lb_assignment(*experiment, results.size(), seconds, metrics);
                 }
             }
 

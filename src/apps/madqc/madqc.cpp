@@ -32,6 +32,7 @@
 #if defined(HAVE_SYS_TYPES_H) && defined(HAVE_SYS_STAT_H) &&                   \
     defined(HAVE_UNISTD_H)
 
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -45,10 +46,17 @@
 #endif
 
 #include <madness/misc/info.h>
+#include <madness/world/ranks_and_hosts.h>
 #include <madness/world/worldmem.h>
 
+#include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <vector>
 
 #include <Drivers.hpp>
 #include <ParameterManager.hpp>
@@ -168,6 +176,55 @@ void print_parameters(World &world, const commandlineparser &parser,
                       "\nAvailable data group are: dft, nemo, response, cc2, "
                       "cis, oep, pcm, optimization, geometry\n";
     print(msg);
+  }
+}
+
+/// Evaluation only: one line of the job-final RSS report
+struct LBExperimentRankRSS {
+  long rank = 0;
+  std::string host;
+  double peak_gib = 0.0;
+
+  template <typename Archive> void serialize(Archive &ar) {
+    ar & rank & host & peak_gib;
+  }
+};
+
+/// Evaluation only: if the selector is set, rank 0 writes one LBEXP_RSS line
+/// per rank. This is the job high-water RSS, not the current RSS.
+static void report_lb_experiment_rss(madness::World &world) {
+  const std::optional<madness::LBExperimentAlgorithm> algorithm =
+      madness::detail::select_lb_experiment_algorithm(world);
+  if (!algorithm)
+    return;
+
+  struct rusage usage{};
+  MADNESS_CHECK_THROW(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
+#ifdef __APPLE__
+  const double unit_bytes = 1.0; // ru_maxrss is in bytes on macOS
+#else
+  const double unit_bytes = 1024.0; // ru_maxrss is in KiB on Linux
+#endif
+  LBExperimentRankRSS local;
+  local.rank = world.rank();
+  local.host = madness::get_hostname();
+  local.peak_gib =
+      static_cast<double>(usage.ru_maxrss) * unit_bytes / (1024.0 * 1024.0 * 1024.0);
+
+  std::vector<LBExperimentRankRSS> all =
+      world.gop.concat0(std::vector<LBExperimentRankRSS>{local});
+  world.gop.fence();
+  std::sort(all.begin(), all.end(),
+            [](const LBExperimentRankRSS &a, const LBExperimentRankRSS &b) {
+              return a.rank < b.rank;
+            });
+  for (const LBExperimentRankRSS &entry : all) {
+    std::ostringstream line;
+    line << std::setprecision(17)
+         << "LBEXP_RSS algorithm=" << madness::detail::lb_experiment_name(*algorithm)
+         << " rank=" << entry.rank << " host=" << entry.host
+         << " peak_gib=" << entry.peak_gib;
+    std::cout << line.str() << std::endl;
   }
 }
 
@@ -331,6 +388,7 @@ int main(int argc, char **argv) {
 
       std::string prefix = pm.prefix();
       wf.run(prefix);
+      report_lb_experiment_rss(world);
 
       // Human-readable chemistry report: to stdout and <prefix>.out. The
       // machine-readable <prefix>.calc_info.json remains the source of truth.

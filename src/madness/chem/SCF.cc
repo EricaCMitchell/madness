@@ -45,6 +45,14 @@
 #include <madness/chem/population.h>
 #include <madchem.h>
 
+#include <functional>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <optional>
+#include <sstream>
+#include <string>
+
 #if defined(__has_include)
 #  if __has_include(<filesystem>)
 #    define MADCHEM_HAS_STD_FILESYSTEM
@@ -106,6 +114,24 @@ static double rsquared(const coordT& r) {
 // }
 
 // Timer modified to correctly nest
+/// Evaluation only: runs work between two fences and, if the selector is set, makes rank 0 write
+/// one LBEXP_REDIST line. The phase label is stable, and each label counts its own occurrences.
+static void lbexp_timed_redistribution(World& world, const std::string& phase, const std::function<void()>& work) {
+    const std::optional<LBExperimentAlgorithm> algorithm = detail::select_lb_experiment_algorithm(world);
+    world.gop.fence();
+    const double start = wall_time();
+    work();
+    world.gop.fence();
+    const double seconds = wall_time() - start;
+    if (algorithm && world.rank() == 0) {
+        static std::map<std::string, long> occurrences;
+        std::ostringstream line;
+        line << std::setprecision(17) << "LBEXP_REDIST algorithm=" << detail::lb_experiment_name(*algorithm)
+             << " phase=" << phase << " occurrence=" << occurrences[phase]++ << " seconds=" << seconds;
+        std::cout << line.str() << std::endl;
+    }
+}
+
 static bool print_timings = false;
 static std::vector<double> ttt, sss;
 
@@ -1155,7 +1181,8 @@ void SCF::initial_guess_ao_eigenvectors(World& world, tensorT& c, tensorT& e) {
                     lbcost<double, 3>(param.vnucextra() * 1.0, param.vnucextra() * 8.0), false);
         lb.add_tree(rho, lbcost<double, 3>(1.0, 8.0), true);
 
-        FunctionDefaults<3>::redistribute(world, lb.load_balance(param.get<int>("loadbalparts")));
+        const std::shared_ptr<WorldDCPmapInterface<Key<3> > > newpmap = lb.load_balance(param.get<int>("loadbalparts"));
+        lbexp_timed_redistribution(world, "guess_density", [&] { FunctionDefaults<3>::redistribute(world, newpmap); });
         END_TIMER(world, "guess loadbal");
     }
 
@@ -1209,7 +1236,8 @@ void SCF::initial_guess_ao_eigenvectors(World& world, tensorT& c, tensorT& e) {
         for (unsigned int i = 0; i < ao.size(); ++i) {
             lb.add_tree(ao[i], lbcost<double, 3>(1.0, 8.0), false);
         }
-        FunctionDefaults<3>::redistribute(world, lb.load_balance(param.get<int>("loadbalparts")));
+        const std::shared_ptr<WorldDCPmapInterface<Key<3> > > newpmap = lb.load_balance(param.get<int>("loadbalparts"));
+        lbexp_timed_redistribution(world, "guess_ao", [&] { FunctionDefaults<3>::redistribute(world, newpmap); });
         END_TIMER(world, "guess loadbal");
     }
     START_TIMER(world);
@@ -1460,7 +1488,8 @@ void SCF::initial_load_bal(World& world) {
     }
     lb.add_tree(vnuc, lbcost<double, 3>(param.vnucextra() * 1.0, param.vnucextra() * 8.0));
 
-    FunctionDefaults<3>::redistribute(world, lb.load_balance(param.loadbalparts()));
+    const std::shared_ptr<WorldDCPmapInterface<Key<3> > > newpmap = lb.load_balance(param.loadbalparts());
+    lbexp_timed_redistribution(world, "initial", [&] { FunctionDefaults<3>::redistribute(world, newpmap); });
 }
 
 functionT SCF::make_density(World& world, const tensorT& occ,
@@ -2098,9 +2127,9 @@ tensorT SCF::make_fock_matrix(World& world, const vecfuncT& psi,
         std::shared_ptr<WorldDCPmapInterface<Key<3> > > newpmap = lb.load_balance(param.loadbalparts());
         FunctionDefaults<3>::set_pmap(newpmap);
 
-        world.gop.fence();
-        for (unsigned int i = 0; i < psi.size(); ++i) psicopy[i] = copy(psi[i], newpmap, false);
-        world.gop.fence();
+        lbexp_timed_redistribution(world, "kinetic_copy", [&] {
+            for (unsigned int i = 0; i < psi.size(); ++i) psicopy[i] = copy(psi[i], newpmap, false);
+        });
         END_TIMER(world, "KE redist");
     }
 
@@ -2329,8 +2358,9 @@ void SCF::loadbal(World& world, functionT& arho, functionT& brho,
     }
     world.gop.fence();
 
-    FunctionDefaults<3>::redistribute(world, lb.load_balance(
-            param.loadbalparts())); // 6.0 needs retuning after param.vnucextra
+    // 6.0 needs retuning after param.vnucextra
+    const std::shared_ptr<WorldDCPmapInterface<Key<3> > > newpmap = lb.load_balance(param.loadbalparts());
+    lbexp_timed_redistribution(world, "scf_iteration", [&] { FunctionDefaults<3>::redistribute(world, newpmap); });
 
     world.gop.fence();
 }
